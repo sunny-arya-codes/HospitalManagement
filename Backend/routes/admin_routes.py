@@ -2,7 +2,6 @@ from flask import Blueprint, request, jsonify
 from flask_jwt_extended import jwt_required, get_jwt_identity
 from functools import wraps
 from models import db, User, Doctor, Patient, Appointment, Department, DoctorAvailability, Treatment
-from app import cache
 import datetime
 
 admin_bp = Blueprint("admin", __name__)
@@ -97,7 +96,6 @@ def delete_department(dept_id):
 # ─────────────────────────── DOCTORS ───────────────────────────
 @admin_bp.route("/doctors", methods=["GET"])
 @admin_required
-@cache.cached(timeout=60, key_prefix="admin_doctors_list")
 def get_doctors():
     doctors = Doctor.query.all()
     return jsonify([d.to_dict() for d in doctors]), 200
@@ -140,7 +138,6 @@ def create_doctor():
     )
     db.session.add(doctor)
     db.session.commit()
-    cache.delete("admin_doctors_list")
     return jsonify(doctor.to_dict()), 201
 
 
@@ -171,7 +168,6 @@ def update_doctor(doctor_id):
     if data.get("is_active") is not None:
         doctor.user.is_active = data["is_active"]
     db.session.commit()
-    cache.delete("admin_doctors_list")
     return jsonify(doctor.to_dict()), 200
 
 
@@ -183,7 +179,6 @@ def delete_doctor(doctor_id):
     db.session.delete(doctor)
     db.session.delete(user)
     db.session.commit()
-    cache.delete("admin_doctors_list")
     return jsonify({"message": "Doctor removed"}), 200
 
 

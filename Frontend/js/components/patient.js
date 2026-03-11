@@ -40,7 +40,7 @@ const PatientDashboard = {
               <div v-if="!upcoming.length" class="empty-state py-3"><i class="bi bi-calendar-x"></i><p>No upcoming appointments. <a href="#" @click.prevent="$emit('navigate','patient-doctors')">Book one now!</a></p></div>
               <div v-for="a in upcoming" :key="a.id" class="d-flex align-items-center justify-content-between p-2 border rounded mb-2">
                 <div>
-                  <div class="fw-semibold">Dr. {{ a.doctor_name }}</div>
+                  <div class="fw-semibold">{{ a.doctor_name }}</div>
                   <div class="small text-muted">{{ a.doctor_specialization }} · {{ fmt(a.date) }} at {{ a.time }}</div>
                 </div>
                 <span class="badge status-booked">Booked</span>
@@ -66,7 +66,7 @@ const PatientDashboard = {
           <h6 class="fw-bold mb-3"><i class="bi bi-clock-history me-2 text-secondary"></i>Recent Treatment History</h6>
           <div v-for="a in recent" :key="a.id" class="border rounded p-3 mb-2">
             <div class="d-flex justify-content-between mb-1">
-              <div class="fw-semibold">Dr. {{ a.doctor_name }} — {{ a.doctor_specialization }}</div>
+              <div class="fw-semibold">{{ a.doctor_name }} — {{ a.doctor_specialization }}</div>
               <span class="small text-muted">{{ fmt(a.date) }}</span>
             </div>
             <div v-if="a.treatment" class="small text-muted">
@@ -144,8 +144,8 @@ const PatientDoctors = {
       <div class="hms-card p-3 mb-4">
         <div class="row g-2">
           <div class="col-md-4"><div class="position-relative"><i class="bi bi-search search-icon"></i><input v-model="filters.name" class="form-control hms-search" placeholder="Doctor name…" @keyup.enter="search"/></div></div>
-          <div class="col-md-3"><input v-model="filters.specialization" type="text" class="form-control" placeholder="Specialization…"/></div>
-          <div class="col-md-3"><select v-model="filters.department_id" class="form-select"><option value="">All Departments</option><option v-for="d in departments" :key="d.id" :value="d.id">{{ d.name }}</option></select></div>
+          <div class="col-md-3"><input v-model="filters.specialization" type="text" class="form-control" placeholder="Specialization…" @keyup.enter="search"/></div>
+          <div class="col-md-3"><select v-model="filters.department_id" class="form-select" @change="search"><option value="">All Departments</option><option v-for="d in departments" :key="d.id" :value="d.id">{{ d.name }}</option></select></div>
           <div class="col-auto"><button class="btn btn-primary" @click="search" :disabled="loading"><i class="bi bi-search"></i></button></div>
         </div>
       </div>
@@ -158,7 +158,7 @@ const PatientDoctors = {
               <div class="d-flex align-items-center gap-3 mb-3">
                 <div class="doctor-avatar">{{ d.name[0] }}</div>
                 <div>
-                  <div class="fw-bold">Dr. {{ d.name }}</div>
+                  <div class="fw-bold">{{ d.name }}</div>
                   <div class="small text-muted">{{ d.specialization }}</div>
                   <div class="small text-muted" v-if="d.department">{{ d.department.name }}</div>
                 </div>
@@ -183,7 +183,7 @@ const PatientDoctors = {
       <div v-if="showBookModal && selectedDoctor" class="modal d-block" style="background:rgba(0,0,0,0.5)">
         <div class="modal-dialog"><div class="modal-content">
           <div class="modal-header">
-            <h5 class="modal-title">Book with Dr. {{ selectedDoctor.name }}</h5>
+            <h5 class="modal-title">Book with {{ selectedDoctor.name }}</h5>
             <button class="btn-close" @click="showBookModal=false"></button>
           </div>
           <div class="modal-body">
@@ -353,12 +353,66 @@ const PatientHistory = {
       this.exporting = true; this.exportMsg = "";
       try {
         const res = await this.api.patientExport();
-        this.exportMsg = res.message || "Export started. You'll receive an email when ready.";
+        this.exportMsg = res.message || "Export started...";
         if (res.download_url) {
-          window.open("http://localhost:5001" + res.download_url, "_blank");
+          const token = localStorage.getItem("hms_token");
+          const url = `${res.download_url}?token=${token}`;
+          window.location.href = url;
+          this.exporting = false;
+        } else if (res.job_id) {
+          this.pollExportJob(res.job_id);
+        } else {
+          this.exporting = false;
         }
-      } catch(e) { this.exportMsg = e.error || "Export failed"; }
-      finally { this.exporting = false; }
+      } catch(e) { 
+        this.exportMsg = e.error || "Export failed"; 
+        this.exporting = false;
+      }
+    },
+    pollExportJob(jobId) {
+      let attempts = 0;
+      const maxAttempts = 30; // ~1 min
+      const check = async () => {
+        try {
+          const jobs = await this.api.patientExportJobs();
+          const job = jobs.find(j => j.id === jobId);
+          if (job) {
+            if (job.status === "completed" && job.file_path) {
+              this.exportMsg = "Export complete! Downloading...";
+              const filename = job.file_path.split('/').pop().split('\\').pop();
+              setTimeout(async () => {
+                try {
+                  const token = localStorage.getItem("hms_token");
+                  const url = `/api/patient/export/download/${filename}?token=${token}`;
+                  window.location.href = url;
+                  
+                  this.exporting = false;
+                  this.exportMsg = "Export downloaded.";
+                  setTimeout(() => { this.exportMsg = ""; }, 3000);
+                } catch (err) {
+                  this.exportMsg = "Failed: " + err.message;
+                  this.exporting = false;
+                }
+              }, 1000);
+              return;
+            } else if (job.status === "failed") {
+              this.exportMsg = "Export failed on server.";
+              this.exporting = false;
+              return;
+            }
+          }
+        } catch (e) {
+          console.error("Poller error", e);
+        }
+        attempts++;
+        if (attempts < maxAttempts) {
+          setTimeout(check, 2000);
+        } else {
+          this.exportMsg = "Export is taking longer than expected. Please check your email later.";
+          this.exporting = false;
+        }
+      };
+      setTimeout(check, 2000);
     },
     fmt: formatDate,
   },

@@ -4,52 +4,41 @@ Celery tasks for:
   2. Monthly activity report for doctors (via email)
   3. Async CSV export for patients
 """
-from celery import Celery
+from celery import Celery, shared_task
 from celery.schedules import crontab
 import os, csv, io, datetime, requests, smtplib
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 
 
-def make_celery(app):
-    celery = Celery(
-        app.import_name,
-        broker=app.config["CELERY_BROKER_URL"],
-        backend=app.config["CELERY_RESULT_BACKEND"],
-    )
-    celery.conf.update(app.config)
+celery_app = Celery("tasks", include=["tasks"])
 
-    celery.conf.beat_schedule = {
+def make_celery(app):
+    celery_app.conf.update(
+        broker_url=app.config.get("CELERY_BROKER_URL", "redis://localhost:6379/1"),
+        result_backend=app.config.get("CELERY_RESULT_BACKEND", "redis://localhost:6379/2"),
+        timezone="Asia/Kolkata",
+        enable_utc=False
+    )
+
+    celery_app.conf.beat_schedule = {
         "daily-reminders": {
             "task": "tasks.send_daily_reminders",
-            "schedule": crontab(hour=8, minute=0),  # Every day at 8 AM
+            "schedule": crontab(hour=10, minute=5),  # Every day at 8 AM
         },
         "monthly-report": {
             "task": "tasks.send_monthly_reports",
-            "schedule": crontab(hour=7, minute=0, day_of_month=1),  # 1st of every month
+            "schedule": crontab(hour=10, minute=5, day_of_month=11),  # 1st of every month
         },
     }
 
-    class ContextTask(celery.Task):
+    class ContextTask(celery_app.Task):
         def __call__(self, *args, **kwargs):
             with app.app_context():
                 return self.run(*args, **kwargs)
 
-    celery.Task = ContextTask
-    return celery
-
-
-# ─── Standalone celery instance (used when imported without app) ───
-_celery = Celery(__name__)
-
-
-def _get_celery():
-    """Return the app-bound celery instance if available."""
-    try:
-        from celery_worker import celery as c
-        return c
-    except ImportError:
-        return _celery
+    celery_app.Task = ContextTask
+    return celery_app
 
 
 # ─────────────────────────── EMAIL HELPER ───────────────────────────
@@ -71,14 +60,10 @@ def _send_email(to_email, subject, html_body, config):
         return False
 
 
-def _send_gchat(webhook_url, message):
-    try:
-        requests.post(webhook_url, json={"text": message}, timeout=10)
-    except Exception as e:
-        print(f"[GCHAT ERROR] {e}")
 
 
 # ─────────────────────────── TASK 1: DAILY REMINDERS ───────────────────────────
+@celery_app.task(name="tasks.send_daily_reminders")
 def send_daily_reminders():
     """Send reminders to patients with appointments today."""
     from app import create_app
@@ -89,7 +74,6 @@ def send_daily_reminders():
         appointments = Appointment.query.filter_by(date=today, status="Booked").all()
 
         config = app.config
-        webhook_url = config.get("GCHAT_WEBHOOK_URL", "")
 
         for appt in appointments:
             patient = appt.patient
@@ -109,7 +93,7 @@ def send_daily_reminders():
             <p>Dear <b>{patient_name}</b>,</p>
             <p>This is a reminder that you have an appointment today:</p>
             <ul>
-                <li><b>Doctor:</b> Dr. {doctor_name}</li>
+                <li><b>Doctor:</b> {doctor_name}</li>
                 <li><b>Specialization:</b> {doctor.specialization}</li>
                 <li><b>Date:</b> {today.strftime('%B %d, %Y')}</li>
                 <li><b>Time:</b> {appt_time}</li>
@@ -124,19 +108,13 @@ def send_daily_reminders():
                 _send_email(email, subject, html_body, config)
                 print(f"[REMINDER] Sent to {patient_name} ({email}) for {appt_time}")
 
-            if webhook_url:
-                msg = (
-                    f"🏥 *Appointment Reminder*\n"
-                    f"Patient: {patient_name}\n"
-                    f"Doctor: Dr. {doctor_name}\n"
-                    f"Time: {appt_time} today"
-                )
-                _send_gchat(webhook_url, msg)
+
 
         print(f"[DAILY REMINDERS] Processed {len(appointments)} appointments for {today}")
 
 
 # ─────────────────────────── TASK 2: MONTHLY REPORT ───────────────────────────
+@celery_app.task(name="tasks.send_monthly_reports")
 def send_monthly_reports():
     """Send monthly activity reports to all doctors."""
     from app import create_app
@@ -179,7 +157,7 @@ def send_monthly_reports():
             html_report = f"""
             <html><body style="font-family:Arial,sans-serif;">
             <h1>Monthly Activity Report - {month_name}</h1>
-            <h2>Dr. {doctor.name}</h2>
+            <h2>{doctor.name}</h2>
             <p><b>Specialization:</b> {doctor.specialization}</p>
             <hr>
             <h3>Summary</h3>
@@ -203,12 +181,13 @@ def send_monthly_reports():
             """
 
             email = doctor.user.email
-            subject = f"📊 Monthly Report - {month_name} | Dr. {doctor.name}"
+            subject = f"📊 Monthly Report - {month_name} | {doctor.name}"
             _send_email(email, subject, html_report, config)
-            print(f"[MONTHLY REPORT] Sent to Dr. {doctor.name} ({email})")
+            print(f"[MONTHLY REPORT] Sent to {doctor.name} ({email})")
 
 
 # ─────────────────────────── TASK 3: CSV EXPORT ───────────────────────────
+@celery_app.task(name="tasks.export_patient_csv")
 def export_patient_csv(patient_id, job_id):
     """Async CSV export for patient treatment history."""
     from app import create_app
@@ -287,12 +266,3 @@ def export_patient_csv(patient_id, job_id):
         print(f"[EXPORT] Job {job_id} for patient {patient_id} completed")
 
 
-# ─── Register as Celery tasks when celery_worker imports this ───
-try:
-    from celery_worker import celery
-
-    export_patient_csv = celery.task(name="tasks.export_patient_csv")(export_patient_csv)
-    send_daily_reminders = celery.task(name="tasks.send_daily_reminders")(send_daily_reminders)
-    send_monthly_reports = celery.task(name="tasks.send_monthly_reports")(send_monthly_reports)
-except (ImportError, RuntimeError):
-    pass

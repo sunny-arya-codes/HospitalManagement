@@ -3,7 +3,7 @@ const { createApp, ref, computed, onMounted } = Vue;
 const App = {
   components: {
     LoginPage, RegisterPage,
-    AdminDashboard, AdminDoctors, AdminPatients, AdminAppointments, AdminSearch,
+    AdminDashboard, AdminDoctors, AdminPatients, AdminAppointments, AdminSearch, AdminDepartments,
     DoctorDashboard, DoctorAppointments, DoctorPatients, DoctorAvailability, DoctorProfile,
     PatientDashboard, PatientDoctors, PatientAppointments, PatientHistory, PatientProfile,
     ChangePassword,

@@ -387,3 +387,144 @@ const AdminSearch = {
     </div>
   `,
 };
+
+const AdminDepartments = {
+  name: "AdminDepartments",
+  props: ["api"],
+  data() {
+    return {
+      departments: [], loading: true, search: "",
+      showModal: false, editMode: false, saving: false,
+      form: { name: "", description: "" },
+      editId: null
+    };
+  },
+  async mounted() {
+    await this.load();
+  },
+  computed: {
+    filtered() {
+      const q = this.search.toLowerCase();
+      return this.departments.filter(d => !q || d.name.toLowerCase().includes(q) || (d.description || "").toLowerCase().includes(q));
+    }
+  },
+  methods: {
+    async load() {
+      this.loading = true;
+      try {
+        this.departments = await this.api.adminDepartments();
+      } catch (e) { console.error(e); }
+      finally { this.loading = false; }
+    },
+    openAdd() {
+      this.editMode = false; this.editId = null;
+      this.form = { name: "", description: "" };
+      this.showModal = true;
+    },
+    openEdit(d) {
+      this.editMode = true; this.editId = d.id;
+      this.form = { name: d.name, description: d.description || "" };
+      this.showModal = true;
+    },
+    async save() {
+      if (!this.form.name.trim()) return;
+      this.saving = true;
+      try {
+        if (this.editMode) {
+          await this.api.adminUpdateDepartment(this.editId, this.form);
+        } else {
+          await this.api.adminCreateDepartment(this.form);
+        }
+        this.showModal = false;
+        await this.load();
+      } catch (e) { alert(e.error || "Failed"); }
+      finally { this.saving = false; }
+    },
+    async remove(d) {
+      if (!confirm(`Are you sure you want to delete the ${d.name} department?`)) return;
+      try {
+        await this.api.adminDeleteDepartment(d.id);
+        await this.load();
+      } catch (e) { alert(e.error || "Failed"); }
+    }
+  },
+  template: `
+    <div>
+      <div class="page-header d-flex justify-content-between align-items-center flex-wrap gap-2">
+        <div><h2><i class="bi bi-diagram-3 me-2"></i>Manage Departments</h2><p>Add and configure hospital departments</p></div>
+        <button class="btn btn-light fw-bold" @click="openAdd"><i class="bi bi-plus-circle me-2"></i>Add Department</button>
+      </div>
+
+      <div class="hms-card p-3">
+        <div class="row align-items-center mb-3 g-2">
+          <div class="col-md-5">
+            <div class="position-relative">
+              <i class="bi bi-search search-icon"></i>
+              <input v-model="search" type="text" class="form-control hms-search" placeholder="Search departments..."/>
+            </div>
+          </div>
+          <div class="col-auto ms-auto text-muted small my-auto">{{ filtered.length }} department(s)</div>
+        </div>
+
+        <div v-if="loading" class="hms-spinner"><div class="spinner-border text-primary"></div></div>
+        <div v-else class="table-responsive">
+          <table class="table hms-table table-hover mb-0">
+            <thead>
+              <tr>
+                <th>#</th>
+                <th>Name</th>
+                <th>Description</th>
+                <th>Total Doctors</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-if="!filtered.length">
+                <td colspan="5" class="text-center py-4 text-muted"><i class="bi bi-inbox fs-3 d-block mb-2 opacity-25"></i>No departments found</td>
+              </tr>
+              <tr v-for="d in filtered" :key="d.id">
+                <td class="text-muted">{{ d.id }}</td>
+                <td class="fw-semibold">{{ d.name }}</td>
+                <td class="text-muted small w-50">{{ d.description || '—' }}</td>
+                <td><span class="badge bg-light text-dark border">{{ d.doctors_count }}</span></td>
+                <td>
+                  <button class="btn btn-sm btn-outline-primary me-1" @click="openEdit(d)" title="Edit"><i class="bi bi-pencil"></i></button>
+                  <button class="btn btn-sm btn-outline-danger" @click="remove(d)" title="Delete" :disabled="d.doctors_count > 0"><i class="bi bi-trash"></i></button>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Add/Edit Modal -->
+      <div v-if="showModal" class="modal d-block" style="background:rgba(0,0,0,0.5)">
+        <div class="modal-dialog">
+          <div class="modal-content">
+            <div class="modal-header">
+              <h5 class="modal-title">{{ editMode ? 'Edit Department' : 'Add Department' }}</h5>
+              <button type="button" class="btn-close" @click="showModal=false"></button>
+            </div>
+            <div class="modal-body">
+              <div class="mb-3">
+                <label class="form-label">Department Name *</label>
+                <input v-model="form.name" type="text" class="form-control" required/>
+              </div>
+              <div class="mb-3">
+                <label class="form-label">Description</label>
+                <textarea v-model="form.description" class="form-control" rows="3"></textarea>
+              </div>
+            </div>
+            <div class="modal-footer">
+              <button class="btn btn-secondary" @click="showModal=false">Cancel</button>
+              <button class="btn btn-primary" @click="save" :disabled="saving">
+                <span v-if="saving" class="spinner-border spinner-border-sm me-1"></span>
+                {{ editMode ? 'Update' : 'Add Department' }}
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  `
+};

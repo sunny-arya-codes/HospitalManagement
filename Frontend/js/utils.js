@@ -1,5 +1,5 @@
 // ── API Base URL ──────────────────────────────────────────
-const API_BASE = "http://localhost:5001/api";
+const API_BASE = "/api";
 
 // ── API helper ────────────────────────────────────────────
 const createApi = (getToken) => {
@@ -48,6 +48,8 @@ const createApi = (getToken) => {
     adminSearch: (q, type) => request("GET", `/admin/search?q=${encodeURIComponent(q)}&type=${type || "all"}`),
     adminDepartments: () => request("GET", "/admin/departments"),
     adminCreateDepartment: (data) => request("POST", "/admin/departments", data),
+    adminUpdateDepartment: (id, data) => request("PUT", `/admin/departments/${id}`, data),
+    adminDeleteDepartment: (id) => request("DELETE", `/admin/departments/${id}`),
 
     // Doctor
     doctorDashboard: () => request("GET", "/doctor/dashboard"),

@@ -27,23 +27,17 @@ fi
 echo "📦 Installing / updating backend dependencies..."
 "$VENV/bin/pip" install -q -r "$BACKEND_DIR/requirements.txt"
 
-# ── 2. Start Flask backend ────────────────────────
-echo "🚀 Starting Flask backend on http://localhost:5001 ..."
+# ── 2. Start Flask backend (now also serving frontend) ──
+echo "🚀 Starting Hospital Management System on http://localhost:8000 ..."
 "$VENV/bin/python" "$BACKEND_DIR/app.py" &
 BACKEND_PID=$!
 
-# ── 3. Start frontend static server ──────────────
-echo "🌐 Starting frontend on http://localhost:8080 ..."
-python3 -m http.server 8080 --directory "$FRONTEND_DIR" &
-FRONTEND_PID=$!
-
 echo ""
 echo "✅ Hospital Management System is running!"
-echo "   Backend  → http://localhost:5001"
-echo "   Frontend → http://localhost:8080"
+echo "   Access the app  → http://localhost:8000"
 echo ""
 echo "   Admin login: admin / Admin@123"
 echo ""
-echo "Press Ctrl+C to stop all services."
+echo "Press Ctrl+C to stop the server."
 
 wait

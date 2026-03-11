@@ -5,7 +5,7 @@ Flask-CORS==4.0.1
 Flask-Caching==2.3.0
 Flask-Mail==0.10.0
 Werkzeug==3.0.3
-SQLAlchemy==2.0.30
+SQLAlchemy==2.0.36
 celery==5.4.0
 redis==5.0.7
 requests==2.32.3

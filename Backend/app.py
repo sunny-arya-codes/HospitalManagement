@@ -14,8 +14,14 @@ jwt = JWTManager()
 
 
 def create_app(config_name="default"):
-    app = Flask(__name__)
+    # Serve static files from the Frontend directory
+    frontend_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "Frontend"))
+    app = Flask(__name__, static_folder=frontend_dir, static_url_path="/")
     app.config.from_object(config[config_name])
+
+    @app.route("/")
+    def serve_index():
+        return app.send_static_file("index.html")
 
     # Ensure export directory exists
     os.makedirs(app.config.get("EXPORT_DIR", "exports"), exist_ok=True)
@@ -27,12 +33,12 @@ def create_app(config_name="default"):
     mail.init_app(app)
     CORS(app, supports_credentials=True)
 
-    # Cache init — fallback to SimpleCache if Redis unavailable
-    try:
-        cache.init_app(app)
-    except Exception:
-        app.config["CACHE_TYPE"] = "SimpleCache"
-        cache.init_app(app)
+    # Cache init
+    app.config["CACHE_TYPE"] = "SimpleCache"
+    cache.init_app(app)
+    # Initialize Celery so that shared_task.delay() uses the right broker
+    from tasks import make_celery
+    app.celery = make_celery(app)
 
     # Register blueprints
     from routes.auth_routes import auth_bp
@@ -104,4 +110,4 @@ def _seed_initial_data(app):
 
 if __name__ == "__main__":
     app = create_app("development")
-    app.run(debug=True, host="0.0.0.0", port=5001)
+    app.run(debug=True, host="0.0.0.0", port=8000)

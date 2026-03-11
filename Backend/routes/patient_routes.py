@@ -2,7 +2,6 @@ from flask import Blueprint, request, jsonify, current_app, send_file
 from flask_jwt_extended import jwt_required, get_jwt_identity
 from functools import wraps
 from models import db, User, Doctor, Patient, Appointment, Treatment, DoctorAvailability, Department, ExportJob
-from app import cache
 import datetime, os
 
 patient_bp = Blueprint("patient", __name__)
@@ -64,6 +63,12 @@ def dashboard():
 
 
 # ─────────────────────────── PROFILE ───────────────────────────
+@patient_bp.before_request
+def debug_url():
+    from flask import request
+    if request.path.startswith("/export/download"):
+        print(f"[DEBUG URL] {request.url}", flush=True)
+
 @patient_bp.route("/profile", methods=["GET"])
 @patient_required
 def get_profile():
@@ -96,7 +101,6 @@ def update_profile():
 # ─────────────────────────── DEPARTMENTS ───────────────────────────
 @patient_bp.route("/departments", methods=["GET"])
 @patient_required
-@cache.cached(timeout=300, key_prefix="departments_all")
 def get_departments():
     depts = Department.query.all()
     return jsonify([d.to_dict() for d in depts]), 200
@@ -116,7 +120,7 @@ def get_doctors():
     if specialization:
         query = query.filter(Doctor.specialization.ilike(f"%{specialization}%"))
     if department_id:
-        query = query.filter_by(department_id=department_id)
+        query = query.filter(Doctor.department_id == department_id)
     if name:
         query = query.filter(Doctor.name.ilike(f"%{name}%"))
 
@@ -304,6 +308,7 @@ def trigger_export():
         db.session.commit()
         return jsonify({"message": "Export started", "job_id": job.id, "task_id": task.id}), 202
     except Exception as e:
+        print(f"[EXPORT ENDPOINT ERROR] Celery delay failed: {e}")
         # If Celery not running, do sync export
         return _sync_export(patient)
 
@@ -355,11 +360,13 @@ def get_export_jobs():
 @patient_bp.route("/export/download/<filename>", methods=["GET"])
 @patient_required
 def download_export(filename):
+    from flask import request
+    print(f"[DEBUG] Received token: {request.args.get('token')}")
     patient = get_current_patient()
     export_dir = current_app.config.get("EXPORT_DIR", "exports")
     filepath = os.path.join(export_dir, filename)
     if not os.path.exists(filepath):
-        return jsonify({"error": "File not found"}), 404
+        return jsonify({"error": "File not found", "attempted_path": filepath, "export_dir": export_dir, "cwd": os.getcwd()}), 404
     # Validate it belongs to this patient
     if not filename.startswith(f"patient_{patient.id}_"):
         return jsonify({"error": "Unauthorized"}), 403
